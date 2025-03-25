@@ -7,7 +7,10 @@ import { z } from "zod";
 import { fetchContractData } from "./defi/aave.js";
 
 // Import Hercules module
-import { ApiClient, Pool } from "./defi/hercules.js";
+import { getHerculesPoolsArray, Pool } from "./defi/hercules.js";
+
+// Import Netswap module
+import { getNetswapLpAprs } from "./defi/netswap.js";
 
 // Define types for our unified protocol
 interface UnifiedPoolData {
@@ -15,10 +18,10 @@ interface UnifiedPoolData {
   symbol: string;
   name: string;
   address?: string;
-  apy: number;
+  apy?: number;
   apr?: number;
-  tvl: string;
-  tvlUsd?: number;
+  tvl: number;
+  borrow?: number;
   borrowApy?: number;
   stableBorrowApy?: number;
   utilizationRate?: number;
@@ -33,27 +36,27 @@ function multiplyStringAsFloat(strValue: string, multiplier: number): number {
  * Combines data from multiple DeFi protocols (AAVE, Hercules) into a unified format
  */
 class DeFiApyProtocol {
-  private herculesClient: ApiClient;
   private cachedData: UnifiedPoolData[] = [];
-
-  constructor(
-    herculesApiUrl: string = "https://api.hercules.exchange/pools/apy"
-  ) {
-    this.herculesClient = new ApiClient(herculesApiUrl);
-  }
 
   /**
    * Fetch and normalize data from all supported protocols
    */
   async fetchAllProtocolsData(): Promise<UnifiedPoolData[]> {
+    if (this.cachedData.length > 0) {
+      return this.cachedData;
+    }
     try {
       // Fetch data from Hercules
-      const herculesPoolsArray = await this.herculesClient.getPoolsArray();
-
-      // Transform Hercules data to unified format
-      const herculesData = herculesPoolsArray.map((pool) =>
-        this.transformHerculesPool(pool)
-      );
+      let herculesData: UnifiedPoolData[] = [];
+      try {
+        const herculesPoolsArray = await getHerculesPoolsArray();
+        herculesData = herculesPoolsArray.map((pool) =>
+          this.transformHerculesPool(pool)
+        );
+      } catch (error) {
+        console.error("Error fetching Hercules data:", error);
+        // Continue with other data if Hercules fails
+      }
 
       // Fetch data from AAVE
       let aaveData: UnifiedPoolData[] = [];
@@ -62,11 +65,20 @@ class DeFiApyProtocol {
         aaveData = this.transformAaveData(aaveReserves);
       } catch (error) {
         console.error("Error fetching AAVE data:", error);
-        // Continue with just Hercules data if AAVE fails
+        // Continue with other data if AAVE fails
+      }
+
+      // Fetch data from Netswap
+      let netswapData: UnifiedPoolData[] = [];
+      try {
+        const netswapPairs = await getNetswapLpAprs();
+        netswapData = this.transformNetswapData(netswapPairs);
+      } catch (error) {
+        console.error("Error fetching Netswap data:", error);
       }
 
       // Combine data from all protocols
-      const allData = [...herculesData, ...aaveData];
+      const allData = [...herculesData, ...aaveData, ...netswapData];
 
       // Update cache
       this.cachedData = allData;
@@ -85,15 +97,15 @@ class DeFiApyProtocol {
   /**
    * Transform Hercules pool data to unified format
    */
-  private transformHerculesPool(pool: Pool): UnifiedPoolData {
+  public transformHerculesPool(pool: Pool): UnifiedPoolData {
     return {
       protocol: "Hercules",
-      symbol: pool.name.split("-").join("/"), // Convert "WETH-METIS" to "WETH/METIS"
-      name: pool.name,
+      name: pool.pool,
+      symbol: pool.name,
       address: pool.address,
-      apy: pool.apy,
-      apr: pool.totalApr,
-      tvl: pool.tvl,
+      apy: pool.apy || 0,
+      apr: pool.totalApr || 0,
+      tvl: this.parseFormattedAmount(pool.tvl || "0"),
     };
   }
 
@@ -105,33 +117,97 @@ class DeFiApyProtocol {
       return [];
     }
 
-    return aaveReserves.map((reserve) => ({
-      protocol: "AAVE",
-      symbol: reserve.symbol,
-      name: reserve.name,
-      address: reserve.underlyingAsset,
-      apy: multiplyStringAsFloat(reserve.supplyAPY, 100) || 0,
-      tvl: `$${this.formatAmount(reserve.totalLiquidityUSD)}`,
-      tvlUsd: reserve.totalLiquidityUSD,
-      borrowApy: multiplyStringAsFloat(reserve.variableBorrowAPY, 100) || 0,
-      stableBorrowApy: multiplyStringAsFloat(reserve.stableBorrowAPY, 100) || 0,
-      utilizationRate: reserve.utilizationRate,
-    }));
+    const result = aaveReserves.map((reserve) => {
+      return {
+        protocol: "AAVE",
+        symbol: reserve.symbol,
+        name: reserve.name,
+        address: reserve.underlyingAsset,
+        apy: multiplyStringAsFloat(reserve.supplyAPY, 100) || 0,
+        tvl: this.parseFormattedAmount(reserve.totalLiquidityUSD),
+        borrow: this.parseFormattedAmount(reserve.totalDebtUSD),
+        borrowApy: multiplyStringAsFloat(reserve.variableBorrowAPY, 100) || 0,
+        stableBorrowApy:
+          multiplyStringAsFloat(reserve.stableBorrowAPY, 100) || 0,
+        utilizationRate: reserve.borrowUsageRatio,
+      };
+    });
+
+    return result;
+  }
+
+  /**
+   * Transform Netswap data to unified format
+   */
+  public transformNetswapData(netswapPairs: any[]): UnifiedPoolData[] {
+    if (!netswapPairs || !Array.isArray(netswapPairs)) {
+      return [];
+    }
+
+    return netswapPairs.map((pair) => {
+      return {
+        protocol: "Netswap",
+        symbol: pair.symbol,
+        name: pair.name,
+        address: pair.id,
+        apr: pair.apr,
+        tvl: pair.reserveUSD,
+      };
+    });
   }
 
   /**
    * Format large numbers to human-readable format
    */
-  private formatAmount(amount: number): string {
-    if (amount >= 1_000_000_000) {
-      return `${(amount / 1_000_000_000).toFixed(2)}B`;
-    } else if (amount >= 1_000_000) {
-      return `${(amount / 1_000_000).toFixed(2)}M`;
-    } else if (amount >= 1_000) {
-      return `${(amount / 1_000).toFixed(2)}K`;
-    } else {
-      return amount.toFixed(2);
+  private formatAmount(amount: any): string {
+    // Ensure amount is a number
+    const numAmount = typeof amount === "number" ? amount : parseFloat(amount);
+
+    // Check if conversion resulted in a valid number
+    if (isNaN(numAmount)) {
+      return "0.00";
     }
+
+    if (numAmount >= 1_000_000_000) {
+      return `${(numAmount / 1_000_000_000).toFixed(2)}B`;
+    } else if (numAmount >= 1_000_000) {
+      return `${(numAmount / 1_000_000).toFixed(2)}M`;
+    } else if (numAmount >= 1_000) {
+      return `${(numAmount / 1_000).toFixed(1)}K`;
+    } else {
+      return numAmount.toFixed(2);
+    }
+  }
+
+  /**
+   * Parse formatted amount string back to number
+   * Examples: '$131.7K' -> 131700, '$1.13M' -> 1130000
+   */
+  private parseFormattedAmount(formattedAmount: string): number {
+    if (!formattedAmount) return 0;
+
+    // Remove currency symbol and any commas
+    let cleanedStr = formattedAmount.replace(/[$,]/g, "").trim();
+
+    // Extract the numeric part and the suffix
+    const match = cleanedStr.match(/^([\d.]+)([KMB])?$/i);
+    if (!match) return parseFloat(cleanedStr) || 0;
+
+    const [, numPart, suffix] = match;
+    const baseValue = parseFloat(numPart);
+
+    if (isNaN(baseValue)) return 0;
+
+    // Apply multiplier based on suffix
+    if (suffix === "K" || suffix === "k") {
+      return baseValue * 1_000;
+    } else if (suffix === "M" || suffix === "m") {
+      return baseValue * 1_000_000;
+    } else if (suffix === "B" || suffix === "b") {
+      return baseValue * 1_000_000_000;
+    }
+
+    return baseValue;
   }
 
   /**
@@ -156,7 +232,7 @@ class DeFiApyProtocol {
    */
   async getTopApyPools(limit: number = 10): Promise<UnifiedPoolData[]> {
     const allPools = await this.fetchAllProtocolsData();
-    return allPools.sort((a, b) => b.apy - a.apy).slice(0, limit);
+    return allPools.sort((a, b) => (b.apy || 0) - (a.apy || 0)).slice(0, limit);
   }
 
   /**
@@ -178,7 +254,7 @@ class DeFiApyProtocol {
    */
   async getHighApyPools(threshold: number = 10): Promise<UnifiedPoolData[]> {
     const allPools = await this.fetchAllProtocolsData();
-    return allPools.filter((pool) => pool.apy >= threshold);
+    return allPools.filter((pool) => (pool.apy || 0) >= threshold);
   }
 
   /**
@@ -194,31 +270,11 @@ class DeFiApyProtocol {
     const tvlByProtocol: Record<string, number> = {};
 
     allPools.forEach((pool) => {
-      // Extract numeric value from TVL string
-      let tvlValue = 0;
-
-      if (pool.tvlUsd) {
-        tvlValue = pool.tvlUsd;
-      } else if (pool.tvl) {
-        const tvlStr = pool.tvl.replace("$", "");
-        const numericValue = parseFloat(tvlStr);
-
-        if (tvlStr.includes("B")) {
-          tvlValue = numericValue * 1_000_000_000;
-        } else if (tvlStr.includes("M")) {
-          tvlValue = numericValue * 1_000_000;
-        } else if (tvlStr.includes("K")) {
-          tvlValue = numericValue * 1_000;
-        } else {
-          tvlValue = numericValue;
-        }
-      }
-
       if (!tvlByProtocol[pool.protocol]) {
         tvlByProtocol[pool.protocol] = 0;
       }
 
-      tvlByProtocol[pool.protocol] += tvlValue;
+      tvlByProtocol[pool.protocol] += pool.tvl;
     });
 
     // Calculate total TVL
@@ -356,7 +412,7 @@ class DeFiApyMcpServer {
       "Get pools with high APY",
       getHighApyPoolsSchema,
       async (args, extra) => {
-        const pools = await this.protocol.getHighApyPools(5); // Default threshold of 5%
+        const pools = await this.protocol.getHighApyPools(args.threshold || 10);
         return {
           content: [
             {
@@ -412,7 +468,7 @@ class DeFiApyMcpServer {
 
         // Apply filters
         if (args.minApy !== undefined) {
-          pools = pools.filter((pool) => pool.apy >= args.minApy!);
+          pools = pools.filter((pool) => (pool.apy || 0) >= args.minApy!);
         }
 
         if (args.protocol !== undefined) {
@@ -431,7 +487,7 @@ class DeFiApyMcpServer {
         }
 
         // Sort by APY (highest first)
-        pools.sort((a, b) => b.apy - a.apy);
+        pools.sort((a, b) => (b.apy || 0) - (a.apy || 0));
 
         // Apply limit
         if (args.limit !== undefined && args.limit > 0) {
@@ -488,9 +544,5 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error("Fatal error in main():", error);
-  process.exit(1);
+  console.error("Error in main function:", error);
 });
-
-// Export for module usage
-//export { DeFiApyProtocol, DeFiApyMcpServer, UnifiedPoolData };

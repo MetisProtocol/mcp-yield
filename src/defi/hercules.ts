@@ -1,7 +1,18 @@
 // api-client.ts
 import axios from "axios";
+import { BigNumber } from "bignumber.js";
 
-// Define the types based on the API response structure
+// Define the GraphQL endpoint
+const HERCULES_YIELD_URL = "https://api.hercules.exchange/pools/apy";
+
+// Define the types based on the GraphQL response structure
+export interface Token {
+  id: string;
+  symbol: string;
+  name: string;
+  totalValueLocked: string;
+}
+
 export interface Pool {
   pool: string;
   address: string;
@@ -11,117 +22,129 @@ export interface Pool {
   apy: number;
 }
 
-interface ApiResponse {
-  data: {
-    lastSync: number;
-    pools: {
-      [address: string]: Pool;
-    };
-  };
+/**
+ * Fetch Hercules pools data from the new URL format
+ */
+export async function fetchHerculesPools(): Promise<Pool[]> {
+  try {
+    // Fetch data from the new source
+    const response = await axios.get(HERCULES_YIELD_URL);
+    const { data } = response.data;
+
+    if (!data || !data.pools) {
+      throw new Error("Invalid data format from the new source");
+    }
+
+    // Map the new data format to the existing Pool structure
+    const pools: Pool[] = Object.values(data.pools).map((pool: any) => ({
+      pool: pool.pool,
+      totalApr: pool.totalApr,
+      apy: pool.apy,
+      address: pool.address,
+      name: pool.name,
+      tvl: pool.tvl,
+    }));
+
+    return pools;
+  } catch (error) {
+    console.error("Error fetching Hercules pools from new source:", error);
+    return [];
+  }
 }
 
-export class ApiClient {
-  private readonly baseUrl: string;
+/**
+ * Format TVL value to human-readable string
+ */
+export function formatTvl(tvl: number): string {
+  if (tvl >= 1000000000) {
+    return `$${(tvl / 1000000000).toFixed(2)}B`;
+  } else if (tvl >= 1000000) {
+    return `$${(tvl / 1000000).toFixed(2)}M`;
+  } else if (tvl >= 1000) {
+    return `$${(tvl / 1000).toFixed(1)}k`;
+  }
+  return `$${tvl.toFixed(2)}`;
+}
 
-  constructor(baseUrl: string) {
-    this.baseUrl = baseUrl;
+/**
+ * Calculate APY from APR
+ * APY = (1 + APR/n)^n - 1, where n is the number of compounding periods
+ */
+export function calculateApyFromApr(apr: number): number {
+  // Assuming daily compounding (365 times per year)
+  const n = 365;
+  const aprDecimal = apr / 100;
+  return (Math.pow(1 + aprDecimal / n, n) - 1) * 100;
+}
+
+/**
+ * Gets all pools as an array
+ * @returns Promise with an array of pools
+ */
+export async function getHerculesPoolsArray(): Promise<Pool[]> {
+  return await fetchHerculesPools();
+}
+
+/**
+ * Gets pools sorted by APY in descending order
+ * @returns Promise with sorted pools array
+ */
+export async function getHerculesPoolsSortedByApy(): Promise<Pool[]> {
+  const pools = await getHerculesPoolsArray();
+  return pools.sort((a, b) => (b.apy || 0) - (a.apy || 0));
+}
+
+/**
+ * Gets pools with APY above a specified threshold
+ * @param threshold The minimum APY value
+ * @returns Promise with filtered pools array
+ */
+export async function getHerculesPoolsAboveApyThreshold(
+  threshold: number
+): Promise<Pool[]> {
+  const pools = await getHerculesPoolsArray();
+  return pools.filter((pool) => (pool.apy || 0) > threshold);
+}
+
+/**
+ * Gets the total TVL across all pools
+ * @returns Promise with the total TVL as a formatted string
+ */
+export async function getTotalTvl(): Promise<string> {
+  const pools = await getHerculesPoolsArray();
+
+  // Sum up the totalValueLockedUSD values
+  const totalTvlValue = pools.reduce((total, pool) => {
+    return total + parseFormattedAmount(pool.tvl);
+  }, 0);
+
+  // Format the total TVL
+  return formatTvl(totalTvlValue);
+}
+
+function parseFormattedAmount(formattedAmount: string): number {
+  if (!formattedAmount) return 0;
+
+  // Remove currency symbol and any commas
+  let cleanedStr = formattedAmount.replace(/[$,]/g, "").trim();
+
+  // Extract the numeric part and the suffix
+  const match = cleanedStr.match(/^([\d.]+)([KMB])?$/i);
+  if (!match) return parseFloat(cleanedStr) || 0;
+
+  const [, numPart, suffix] = match;
+  const baseValue = parseFloat(numPart);
+
+  if (isNaN(baseValue)) return 0;
+
+  // Apply multiplier based on suffix
+  if (suffix === "K" || suffix === "k") {
+    return baseValue * 1_000;
+  } else if (suffix === "M" || suffix === "m") {
+    return baseValue * 1_000_000;
+  } else if (suffix === "B" || suffix === "b") {
+    return baseValue * 1_000_000_000;
   }
 
-  /**
-   * Fetches pool data from the API
-   * @returns Promise with the pool data
-   */
-  async fetchPools(): Promise<ApiResponse> {
-    try {
-      const response = await axios.get<ApiResponse>(this.baseUrl);
-      return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        throw new Error(`API Error: ${error.message}`);
-      }
-      throw new Error(`Unexpected error: ${String(error)}`);
-    }
-  }
-
-  /**
-   * Gets all pools as an array
-   * @returns Promise with an array of pools
-   */
-  async getPoolsArray(): Promise<Pool[]> {
-    const response = await this.fetchPools();
-    return Object.values(response.data.pools);
-  }
-
-  /**
-   * Gets the timestamp of the last synchronization
-   * @returns Promise with the last sync timestamp
-   */
-  async getLastSyncTimestamp(): Promise<number> {
-    const response = await this.fetchPools();
-    return response.data.lastSync;
-  }
-
-  /**
-   * Gets a specific pool by its address
-   * @param address The pool address
-   * @returns Promise with the pool data or null if not found
-   */
-  async getPoolByAddress(address: string): Promise<Pool | null> {
-    const response = await this.fetchPools();
-    return response.data.pools[address] || null;
-  }
-
-  /**
-   * Gets pools sorted by APY in descending order
-   * @returns Promise with sorted pools array
-   */
-  async getPoolsSortedByApy(): Promise<Pool[]> {
-    const pools = await this.getPoolsArray();
-    return pools.sort((a, b) => b.apy - a.apy);
-  }
-
-  /**
-   * Gets pools with APY above a specified threshold
-   * @param threshold The minimum APY value
-   * @returns Promise with filtered pools array
-   */
-  async getPoolsAboveApyThreshold(threshold: number): Promise<Pool[]> {
-    const pools = await this.getPoolsArray();
-    return pools.filter((pool) => pool.apy > threshold);
-  }
-
-  /**
-   * Gets the total TVL across all pools
-   * @returns Promise with the total TVL as a formatted string
-   */
-  async getTotalTvl(): Promise<string> {
-    const pools = await this.getPoolsArray();
-
-    // Extract numerical values from TVL strings (e.g., "$1.13M" → 1130000)
-    const totalTvlValue = pools.reduce((total, pool) => {
-      const tvlStr = pool.tvl;
-      const numericValue = parseFloat(tvlStr.replace(/[^0-9.]/g, ""));
-
-      if (tvlStr.includes("k")) {
-        return total + numericValue * 1000;
-      } else if (tvlStr.includes("M")) {
-        return total + numericValue * 1000000;
-      } else if (tvlStr.includes("B")) {
-        return total + numericValue * 1000000000;
-      }
-
-      return total + numericValue;
-    }, 0);
-
-    // Format the total TVL
-    if (totalTvlValue >= 1000000000) {
-      return `$${(totalTvlValue / 1000000000).toFixed(2)}B`;
-    } else if (totalTvlValue >= 1000000) {
-      return `$${(totalTvlValue / 1000000).toFixed(2)}M`;
-    } else if (totalTvlValue >= 1000) {
-      return `$${(totalTvlValue / 1000).toFixed(1)}k`;
-    }
-
-    return `$${totalTvlValue.toFixed(2)}`;
-  }
+  return baseValue;
 }
