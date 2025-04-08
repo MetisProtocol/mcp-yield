@@ -48,10 +48,10 @@ interface GraphQLResponse {
  */
 export async function fetchNetswapPairs(): Promise<Pair[]> {
   try {
-    // GraphQL query to fetch pairs with pagination
+    // GraphQL query to fetch the top 100 pairs by liquidity
     const pairsQuery = `
-      query($skip: Int!, $now: Int!) {
-        pairs(first: 100, skip: $skip, orderBy: reserveUSD, orderDirection: desc) {
+      query($now: Int!) {
+        pairs(first: 100, orderBy: reserveUSD, orderDirection: desc) {
           id
           txCount
           token0 {
@@ -86,38 +86,39 @@ export async function fetchNetswapPairs(): Promise<Pair[]> {
       }
     `;
 
-    // Fetch all pairs using pagination
-    let allPairs: Pair[] = [];
-    let hasMorePairs = true;
-    let skip = 0;
     const now = Math.floor(new Date().getTime() / 1000) - 3600 * 24; // unix timestamp minus 1 day
 
-    while (hasMorePairs) {
-      const pairsResponse = await axios.post<GraphQLResponse>(
-        NETSWAP_GRAPH_URL,
-        {
-          query: pairsQuery,
-          variables: { skip, now },
-        }
-      );
+    const pairsResponse = await axios.post<GraphQLResponse>(NETSWAP_GRAPH_URL, {
+      query: pairsQuery,
+      variables: { now },
+    });
 
-      const batchPairs = pairsResponse.data.data.pairs;
+    const pairs = pairsResponse.data.data.pairs;
 
-      if (batchPairs.length === 0) {
-        hasMorePairs = false;
-      } else {
-        allPairs = [...allPairs, ...batchPairs];
-        skip += 100;
-      }
-    }
-
-    if (allPairs.length === 0) {
+    if (pairs.length === 0) {
       return [];
     }
 
-    allPairs = allPairs.filter((pair) => Number(pair.reserveUSD) > 1000);
+    // Filter pairs with reserveUSD > 1000 and APR > 0
+    return pairs.filter((pair) => {
+      const last24HourVol =
+        pair.pairHourData?.reduce(
+          (sum: BigNumber, data) => sum.plus(data.hourlyVolumeUSD),
+          new BigNumber(0)
+        ) || new BigNumber(0);
 
-    return allPairs;
+      if (new BigNumber(pair.reserveUSD).gt(0)) {
+        const apr = last24HourVol
+          .multipliedBy(365) // Annualize daily volume
+          .multipliedBy(0.0025) // 0.25% fee
+          .div(pair.reserveUSD) // Divide by liquidity
+          .multipliedBy(100); // Convert to percentage
+
+        return apr.gt(0) && new BigNumber(pair.reserveUSD).gt(1000);
+      }
+
+      return false;
+    });
   } catch (error) {
     console.error("Error fetching Netswap pairs:", error);
     return [];

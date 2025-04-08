@@ -35,7 +35,7 @@ function multiplyStringAsFloat(strValue: string, multiplier: number): number {
  * DeFi APY Data Protocol
  * Combines data from multiple DeFi protocols (AAVE, Hercules) into a unified format
  */
-class DeFiApyProtocol {
+export class DeFiApyProtocol {
   private cachedData: UnifiedPoolData[] = [];
 
   /**
@@ -97,7 +97,7 @@ class DeFiApyProtocol {
   /**
    * Transform Hercules pool data to unified format
    */
-  public transformHerculesPool(pool: Pool): UnifiedPoolData {
+  transformHerculesPool(pool: Pool): UnifiedPoolData {
     return {
       protocol: "Hercules",
       name: pool.pool,
@@ -112,7 +112,7 @@ class DeFiApyProtocol {
   /**
    * Transform AAVE data to unified format
    */
-  public transformAaveData(aaveReserves: any[]): UnifiedPoolData[] {
+  transformAaveData(aaveReserves: any[]): UnifiedPoolData[] {
     if (!aaveReserves || !Array.isArray(aaveReserves)) {
       return [];
     }
@@ -124,6 +124,11 @@ class DeFiApyProtocol {
         name: reserve.name,
         address: reserve.underlyingAsset,
         apy: multiplyStringAsFloat(reserve.supplyAPY, 100) || 0,
+        borrowIncentiveAPR:
+          multiplyStringAsFloat(
+            reserve.aIncentivesData[0]?.incentiveAPR,
+            100
+          ) || 0,
         tvl: this.parseFormattedAmount(reserve.totalLiquidityUSD),
         borrow: this.parseFormattedAmount(reserve.totalDebtUSD),
         borrowApy: multiplyStringAsFloat(reserve.variableBorrowAPY, 100) || 0,
@@ -139,7 +144,7 @@ class DeFiApyProtocol {
   /**
    * Transform Netswap data to unified format
    */
-  public transformNetswapData(netswapPairs: any[]): UnifiedPoolData[] {
+  transformNetswapData(netswapPairs: any[]): UnifiedPoolData[] {
     if (!netswapPairs || !Array.isArray(netswapPairs)) {
       return [];
     }
@@ -299,7 +304,7 @@ class DeFiApyProtocol {
 /**
  * MCP Server for DeFi APY Protocol
  */
-class DeFiApyMcpServer {
+export class DeFiApyMcpServer {
   private protocol: DeFiApyProtocol;
   private server: McpServer;
 

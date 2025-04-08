@@ -1,6 +1,4 @@
-// api-client.ts
 import axios from "axios";
-import { BigNumber } from "bignumber.js";
 
 // Define the GraphQL endpoint
 const HERCULES_YIELD_URL = "https://api.hercules.exchange/pools/apy";
