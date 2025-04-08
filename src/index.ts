@@ -12,6 +12,8 @@ import { getHerculesPoolsArray, Pool } from "./defi/hercules.js";
 // Import Netswap module
 import { getNetswapLpAprs } from "./defi/netswap.js";
 
+import { getEnkiApr } from "./defi/enki.js";
+
 // Define types for our unified protocol
 interface UnifiedPoolData {
   protocol: string;
@@ -77,8 +79,22 @@ export class DeFiApyProtocol {
         console.error("Error fetching Netswap data:", error);
       }
 
+      // Fetch data from Enki
+      let enkiData: UnifiedPoolData[] = [];
+      try {
+        const enkiYield = await getEnkiApr();
+        enkiData = this.transformEnkiData(enkiYield);
+      } catch (error) {
+        console.error("Error fetching Enki data:", error);
+      }
+
       // Combine data from all protocols
-      const allData = [...herculesData, ...aaveData, ...netswapData];
+      const allData = [
+        ...herculesData,
+        ...aaveData,
+        ...netswapData,
+        ...enkiData,
+      ];
 
       // Update cache
       this.cachedData = allData;
@@ -157,6 +173,25 @@ export class DeFiApyProtocol {
         address: pair.id,
         apr: pair.apr,
         tvl: pair.reserveUSD,
+      };
+    });
+  }
+
+  /**
+   * Transform Enki data to unified format
+   */
+  transformEnkiData(enkiYield: any[]): UnifiedPoolData[] {
+    if (!enkiYield || !Array.isArray(enkiYield)) {
+      return [];
+    }
+
+    return enkiYield.map((yieldData) => {
+      return {
+        protocol: "Enki",
+        name: yieldData.timestamp,
+        symbol: "eMetis",
+        tvl: yieldData.tvl,
+        apr: yieldData.apr,
       };
     });
   }
