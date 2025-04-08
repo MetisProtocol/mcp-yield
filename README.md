@@ -8,6 +8,8 @@ This project implements an MCP server that collects, normalizes, and exposes len
 
 - AAVE
 - Hercules Exchange
+- Netswap
+- Enki
 
 The server provides a unified interface for querying yield opportunities across these protocols with filtering capabilities by APY, protocol name, and token.
 
