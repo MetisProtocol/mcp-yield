@@ -53,14 +53,11 @@ The server exposes the following tools via the Model Context Protocol:
 
 ### Available Tools
 
-- `getAllPools`: Get all pools from all supported protocols
-- `getPoolsByProtocol`: Get pools from a specific protocol
-- `getTopApyPools`: Get top pools sorted by APY
-- `getPoolsByToken`: Get pools containing a specific token
-- `getHighApyPools`: Get pools with APY above a threshold
-- `getTotalTvl`: Get total value locked (TVL) across all protocols
-- `get-lending-yields`: Get lending yield opportunities with filtering options
-- `get-total-tvl`: Get total TVL across all protocols
+- `getAllYield`: Retrieve yield information from all supported protocols in a unified format.
+- `getYieldByProtocol`: Retrieve yield information from a specific protocol (e.g., AAVE, Hercules, Netswap, Enki).
+- `getTopYield`: Retrieve the top yield information for a set number of yield sources, sorted by APY.
+- `getYieldByToken`: Retrieve yield sources containing a specific token.
+- `getTotalTvl`: Retrieve the total value locked (TVL) across all protocols.
 
 ### Example Queries
 
@@ -68,11 +65,9 @@ The server exposes the following tools via the Model Context Protocol:
 
 ```json
 {
-  "name": "get-lending-yields",
+  "name": "getYieldByProtocol",
   "args": {
-    "minApy": 5,
-    "protocol": "AAVE",
-    "limit": 10
+    "protocol": "AAVE"
   }
 }
 ```
@@ -81,7 +76,7 @@ The server exposes the following tools via the Model Context Protocol:
 
 ```json
 {
-  "name": "get-total-tvl"
+  "name": "getTotalTvl"
 }
 ```
 
@@ -91,14 +86,6 @@ The server exposes the following tools via the Model Context Protocol:
 - `src/defi/`: Protocol-specific implementations
   - `aave.ts`: AAVE protocol integration
   - `hercules.ts`: Hercules Exchange protocol integration
-
-## Dependencies
-
-- `@modelcontextprotocol/sdk`: MCP SDK for creating MCP-compatible servers
-- `@aave/contract-helpers`: Utilities for interacting with AAVE contracts
-- `@bgd-labs/aave-address-book`: Address references for AAVE contracts
-- `axios`: HTTP client for API requests
-- `zod`: Schema validation and typing
 
 ## License
 
