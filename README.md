@@ -22,10 +22,6 @@ The server provides a unified interface for querying yield opportunities across 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/mpc-apy.git
-cd mpc-apy
-
 # Install dependencies
 bun install
 
@@ -43,7 +39,10 @@ Start the MCP server:
       "command": "node",
       "args": [
         "/PATH/TO/mcp-yield/build/index.js"
-      ]
+      ],
+      "env": {
+        "COINGECKO_API_KEY": "your-api-key-here"
+      }
     },
     // Other MCP Servers
 }
@@ -58,6 +57,7 @@ The server exposes the following tools via the Model Context Protocol:
 - `getTopYield`: Retrieve the top yield information for a set number of yield sources, sorted by APY.
 - `getYieldByToken`: Retrieve yield sources containing a specific token.
 - `getTotalTvl`: Retrieve the total value locked (TVL) across all protocols.
+- `getTokenPrice`: Retrieve the price of a specific token. (Requires CoinGecko API Key)
 
 ### Example Queries
 
@@ -79,13 +79,6 @@ The server exposes the following tools via the Model Context Protocol:
   "name": "getTotalTvl"
 }
 ```
-
-## Project Structure
-
-- `src/index.ts`: Main entry point and MCP server implementation
-- `src/defi/`: Protocol-specific implementations
-  - `aave.ts`: AAVE protocol integration
-  - `hercules.ts`: Hercules Exchange protocol integration
 
 ## License
 

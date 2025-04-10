@@ -2,14 +2,19 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { YieldProtocol } from "./utils/aggregator.js";
+import { CoinGecko } from "./utils/coingecko.js";
 import { z } from "zod";
+import * as dotenv from "dotenv";
+dotenv.config();
 
 export class YieldMcpServer {
   private protocol: YieldProtocol;
+  private coinGecko: CoinGecko;
   private server: McpServer;
 
   constructor() {
     this.protocol = new YieldProtocol();
+    this.coinGecko = new CoinGecko();
 
     this.server = new McpServer({
       name: "metis-yield-aggregator",
@@ -22,20 +27,20 @@ export class YieldMcpServer {
     this.server.tool(
       "getAllYield",
       "Get yield information from all supported protocols",
-      async (extra) => {
-        const pools = await this.protocol.getAllData();
+      async () => {
+        const yieldData = await this.protocol.getAllData();
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(pools),
+              text: JSON.stringify(yieldData),
             },
           ],
         };
       }
     );
 
-    const getPoolsByProtocolSchema = {
+    const getYieldByProtocolSchema = {
       protocol: z
         .string()
         .describe(
@@ -46,14 +51,14 @@ export class YieldMcpServer {
     this.server.tool(
       "getYieldByProtocol",
       "Get yield information from a specific protocol",
-      getPoolsByProtocolSchema,
-      async (args, extra) => {
-        const pools = await this.protocol.getDataByProtocol(args.protocol);
+      getYieldByProtocolSchema,
+      async (args) => {
+        const yieldData = await this.protocol.getDataByProtocol(args.protocol);
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(pools),
+              text: JSON.stringify(yieldData),
             },
           ],
         };
@@ -61,7 +66,7 @@ export class YieldMcpServer {
     );
 
     // Get top pools by APY
-    const getTopApyPoolsSchema = {
+    const getTopApySchema = {
       limit: z
         .number()
         .optional()
@@ -71,36 +76,35 @@ export class YieldMcpServer {
     this.server.tool(
       "getTopYield",
       "Get the top yield information for a set number of yield sources",
-      getTopApyPoolsSchema,
-      async (args, extra) => {
-        const pools = await this.protocol.getTopYield(args.limit);
+      getTopApySchema,
+      async (args) => {
+        const yieldData = await this.protocol.getTopYield(args.limit);
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(pools),
+              text: JSON.stringify(yieldData),
             },
           ],
         };
       }
     );
 
-    // Get pools by token
-    const getPoolsByTokenSchema = {
+    const getYieldByTokenSchema = {
       token: z.string().describe("Token symbol or name to search for"),
     };
 
     this.server.tool(
       "getYieldByToken",
       "Get yield sources containing a specific token",
-      getPoolsByTokenSchema,
-      async (args, extra) => {
-        const pools = await this.protocol.getDataByToken(args.token);
+      getYieldByTokenSchema,
+      async (args) => {
+        const yieldData = await this.protocol.getDataByToken(args.token);
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(pools),
+              text: JSON.stringify(yieldData),
             },
           ],
         };
@@ -111,7 +115,7 @@ export class YieldMcpServer {
     this.server.tool(
       "getTotalTvl",
       "Get total TVL across all protocols",
-      async (extra) => {
+      async () => {
         const tvlData = await this.protocol.getTotalTvl();
         return {
           content: [
@@ -124,20 +128,26 @@ export class YieldMcpServer {
       }
     );
 
-    // Define input schema for the get-lending-yields tool
-    const getYieldsInputSchema = {
-      protocol: z
-        .string()
-        .optional()
-        .describe(
-          "Filter by protocol (e.g., 'AAVE', 'Hercules', 'Netswap', 'Enki')"
-        ),
-      token: z.string().optional().describe("Filter by token symbol or name"),
-      limit: z
-        .number()
-        .optional()
-        .describe("Limit the number of results (default: all)"),
+    const getTokenPriceSchema = {
+      token: z.string().describe("Token symbol or name to search for"),
     };
+
+    this.server.tool(
+      "getTokenPrice",
+      "Get token price of a specific token",
+      getTokenPriceSchema,
+      async (args) => {
+        const price = await this.coinGecko.getTokenPrice(args.token);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(price),
+            },
+          ],
+        };
+      }
+    );
   }
 
   /**
